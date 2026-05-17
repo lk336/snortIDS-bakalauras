@@ -1,14 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, TextField, TablePagination,
   Chip, Grid, Button, Dialog, DialogTitle, DialogContent,
   DialogActions, MenuItem, Select,
-  Tooltip, List, ListItemText, ListItemButton, Divider
+  Tooltip, IconButton, List, ListItemText, ListItemButton, Divider
 } from '@mui/material';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
+import DeleteIcon from '@mui/icons-material/Delete';
+import InfoIcon from '@mui/icons-material/Info';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import api from '../api';
 
@@ -38,6 +40,31 @@ export default function Events() {
   const [createFilterOpen, setCreateFilterOpen] = useState(false);
   const [newFilterName, setNewFilterName] = useState('');
   const [newFilterForm, setNewFilterForm] = useState(emptyFilters);
+  const [groupBy, setGroupBy] = useState('none');
+  const [collapsedGroups, setCollapsedGroups] = useState({});
+
+  const role = localStorage.getItem('role');
+  const isAdmin = role === 'admin';
+
+  const [ruleInfo, setRuleInfo] = useState(null);
+
+  const handleShowRule = async (sigSid) => {
+    if (!sigSid) return;
+    try {
+      const res = await api.get(`/rules/by-sid/${sigSid}`);
+      setRuleInfo(res.data);
+    } catch {
+      setRuleInfo({ error: `No rule found for SID ${sigSid}` });
+    }
+  };
+
+  const handleDelete = async (sid, cid) => {
+    if (!window.confirm('Are you sure you want to delete this event?')) return;
+    try {
+      await api.delete(`/events/${sid}/${cid}`);
+      fetchEvents();
+    } catch {}
+  };
 
   const fetchEvents = (overrideFilters, overrideSort, overrideSortDir) => {
     const f = overrideFilters !== undefined ? overrideFilters : filters;
@@ -112,6 +139,23 @@ export default function Events() {
   const getProtocolName = (proto) => ({ 6: 'TCP', 17: 'UDP', 1: 'ICMP' }[proto] || proto);
   const getPriorityColor = (p) => p === 1 ? 'error' : p === 2 ? 'warning' : 'default';
 
+  const groupedEvents = useMemo(() => {
+    if (groupBy === 'none') return { '': events };
+    const groups = {};
+    events.forEach(e => {
+      let key;
+      if (groupBy === 'src_ip') key = e.src_ip || 'Unknown';
+      else if (groupBy === 'dst_ip') key = e.dst_ip || 'Unknown';
+      else if (groupBy === 'signature') key = e.signature || 'Unknown';
+      else if (groupBy === 'protocol') key = getProtocolName(e.protocol);
+      else if (groupBy === 'date') key = e.timestamp ? new Date(e.timestamp).toLocaleDateString('en-GB') : 'Unknown';
+      else key = 'Other';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(e);
+    });
+    return groups;
+  }, [events, groupBy]);
+
   return (
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
@@ -162,6 +206,17 @@ export default function Events() {
               value={filters.date_to}
               onChange={e => setFilters({ ...filters, date_to: e.target.value })} />
           </Grid>
+          <Grid item xs={6} sm={3} md={2}>
+            <Select fullWidth size="small" displayEmpty value={groupBy}
+              onChange={e => { setGroupBy(e.target.value); setCollapsedGroups({}); }}>
+              <MenuItem value="none"><em>No grouping</em></MenuItem>
+              <MenuItem value="src_ip">Source IP</MenuItem>
+              <MenuItem value="dst_ip">Destination IP</MenuItem>
+              <MenuItem value="signature">Signature</MenuItem>
+              <MenuItem value="protocol">Protocol</MenuItem>
+              <MenuItem value="date">Date</MenuItem>
+            </Select>
+          </Grid>
           <Grid item xs={12} sm={6} md={2}>
             <Box display="flex" gap={1}>
               <Button variant="contained" onClick={handleSearch}>Search</Button>
@@ -186,21 +241,44 @@ export default function Events() {
                   </Box>
                 </TableCell>
               ))}
+              {isAdmin && <TableCell sx={{ color: 'white' }}>Actions</TableCell>}
             </TableRow>
           </TableHead>
           <TableBody>
             {events.length === 0 ? (
-              <TableRow><TableCell colSpan={7} align="center">No events found</TableCell></TableRow>
-            ) : events.map((event, i) => (
-              <TableRow key={i} hover>
-                <TableCell>{event.timestamp ? new Date(event.timestamp).toLocaleString('en-GB') : '-'}</TableCell>
-                <TableCell>{event.src_ip || '-'}</TableCell>
-                <TableCell>{event.dst_ip || '-'}</TableCell>
-                <TableCell>{event.src_port && event.dst_port ? `${event.src_port} → ${event.dst_port}` : '-'}</TableCell>
-                <TableCell>{event.signature}</TableCell>
-                <TableCell><Chip size="small" label={event.priority || '-'} color={getPriorityColor(event.priority)} /></TableCell>
-                <TableCell>{getProtocolName(event.protocol)}</TableCell>
-              </TableRow>
+              <TableRow><TableCell colSpan={isAdmin ? 8 : 7} align="center">No events found</TableCell></TableRow>
+            ) : Object.entries(groupedEvents).map(([groupName, groupEvents]) => (
+              <React.Fragment key={groupName}>
+                {groupBy !== 'none' && (
+                  <TableRow sx={{ bgcolor: 'grey.100', cursor: 'pointer' }}
+                    onClick={() => setCollapsedGroups(prev => ({ ...prev, [groupName]: !prev[groupName] }))}>
+                    <TableCell colSpan={isAdmin ? 8 : 7} sx={{ fontWeight: 'bold' }}>
+                      {collapsedGroups[groupName] ? '▶' : '▼'} {groupName} ({groupEvents.length})
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!collapsedGroups[groupName] && groupEvents.map((event, i) => (
+                  <TableRow key={`${groupName}-${i}`} hover>
+                    <TableCell>{event.timestamp ? new Date(event.timestamp).toLocaleString('en-GB') : '-'}</TableCell>
+                    <TableCell>{event.src_ip || '-'}</TableCell>
+                    <TableCell>{event.dst_ip || '-'}</TableCell>
+                    <TableCell>{event.src_port && event.dst_port ? `${event.src_port} → ${event.dst_port}` : '-'}</TableCell>
+                    <TableCell>{event.signature}</TableCell>
+                    <TableCell><Chip size="small" label={event.priority || '-'} color={getPriorityColor(event.priority)} /></TableCell>
+                    <TableCell>{getProtocolName(event.protocol)}</TableCell>
+                    {isAdmin && (
+                      <TableCell>
+                        <IconButton size="small" color="info" onClick={() => handleShowRule(event.sig_sid)}>
+                          <InfoIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton size="small" color="error" onClick={() => handleDelete(event.sid, event.cid)}>
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </TableCell>
+                    )}
+                  </TableRow>
+                ))}
+              </React.Fragment>
             ))}
           </TableBody>
         </Table>
@@ -292,6 +370,29 @@ export default function Events() {
         <DialogActions>
           <Button onClick={() => setCreateFilterOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleCreateFilter}>Save Filter</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!ruleInfo} onClose={() => setRuleInfo(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Triggered Rule</DialogTitle>
+        <DialogContent>
+          {ruleInfo?.error ? (
+            <Typography color="text.secondary">{ruleInfo.error}</Typography>
+          ) : ruleInfo && (
+            <Box>
+              <Typography variant="body2"><b>SID:</b> {ruleInfo.sid}</Typography>
+              <Typography variant="body2"><b>Description:</b> {ruleInfo.description || '-'}</Typography>
+              <Typography variant="body2"><b>Category:</b> {ruleInfo.category || '-'}</Typography>
+              <Typography variant="body2"><b>Enabled:</b> {ruleInfo.is_enabled ? 'Yes' : 'No'}</Typography>
+              <Typography variant="body2" sx={{ mt: 1 }}><b>Rule text:</b></Typography>
+              <Box sx={{ bgcolor: 'grey.100', p: 1, borderRadius: 1, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all', mt: 0.5 }}>
+                {ruleInfo.rule_text}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRuleInfo(null)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>

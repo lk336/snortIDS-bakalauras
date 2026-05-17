@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, Button, Dialog, DialogTitle,
@@ -12,7 +12,6 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import api from '../api';
 
-// ─── Snort rule builder ────────────────────────────────────────────────────────
 const ACTIONS = ['alert', 'log', 'pass', 'drop', 'reject'];
 const PROTOCOLS = ['tcp', 'udp', 'icmp', 'ip'];
 const DIRECTIONS = ['->', '<>'];
@@ -41,12 +40,42 @@ function buildRuleText(f) {
   return `${f.action} ${f.proto} ${f.src_ip} ${f.src_port} ${f.direction} ${f.dst_ip} ${f.dst_port} (${opts})`;
 }
 
-function UiFormMode({ uiForm, setUiForm, previewText }) {
+function parseRuleText(text) {
+  const form = { ...emptyUiForm };
+  try {
+    const headerMatch = text.match(/^(\w+)\s+(\w+)\s+(\S+)\s+(\S+)\s+(->|<>)\s+(\S+)\s+(\S+)\s+\((.+)\)\s*$/s);
+    if (!headerMatch) return null;
+    form.action = headerMatch[1] || 'alert';
+    form.proto = headerMatch[2] || 'tcp';
+    form.src_ip = headerMatch[3] || 'any';
+    form.src_port = headerMatch[4] || 'any';
+    form.direction = headerMatch[5] || '->';
+    form.dst_ip = headerMatch[6] || 'any';
+    form.dst_port = headerMatch[7] || 'any';
+    const optsStr = headerMatch[8];
+    const msgMatch = optsStr.match(/msg\s*:\s*"([^"]*)"/);
+    if (msgMatch) form.msg = msgMatch[1];
+    const contentMatch = optsStr.match(/content\s*:\s*"([^"]*)"/);
+    if (contentMatch) form.content = contentMatch[1];
+    const classMatch = optsStr.match(/classtype\s*:\s*([^;]+)/);
+    if (classMatch) form.classtype = classMatch[1].trim();
+    const prioMatch = optsStr.match(/priority\s*:\s*(\d+)/);
+    if (prioMatch) form.priority = prioMatch[1];
+    const sidMatch = optsStr.match(/sid\s*:\s*(\d+)/);
+    if (sidMatch) form.sid = sidMatch[1];
+    const revMatch = optsStr.match(/rev\s*:\s*(\d+)/);
+    if (revMatch) form.rev = revMatch[1];
+  } catch {
+    return null;
+  }
+  return form;
+}
+
+function UiFormMode({ uiForm, setUiForm, previewText, onPreviewEdit }) {
   const set = (key) => (e) => setUiForm(prev => ({ ...prev, [key]: e.target.value }));
   return (
     <Box>
       <Grid container spacing={2}>
-        {/* Row 1: action, protocol, direction */}
         <Grid item xs={4}>
           <FormControl fullWidth size="small">
             <InputLabel>Action</InputLabel>
@@ -71,8 +100,6 @@ function UiFormMode({ uiForm, setUiForm, previewText }) {
             </Select>
           </FormControl>
         </Grid>
-
-        {/* Row 2: src ip/port → dst ip/port */}
         <Grid item xs={3}>
           <TextField fullWidth size="small" label="Source IP" value={uiForm.src_ip}
             onChange={set('src_ip')} placeholder="any" />
@@ -92,21 +119,16 @@ function UiFormMode({ uiForm, setUiForm, previewText }) {
           <TextField fullWidth size="small" label="Dst Port" value={uiForm.dst_port}
             onChange={set('dst_port')} placeholder="any" />
         </Grid>
-
         <Grid item xs={12}><Divider><Typography variant="caption">Rule options</Typography></Divider></Grid>
-
-        {/* Row 3: msg, content */}
-        <Grid item xs={8}>
+        <Grid item xs={6}>
           <TextField fullWidth size="small" label='msg (alert message)' value={uiForm.msg}
             onChange={set('msg')} placeholder='HTTP traffic detected' />
         </Grid>
-        <Grid item xs={4}>
+        <Grid item xs={3}>
           <TextField fullWidth size="small" label="content (optional)" value={uiForm.content}
             onChange={set('content')} placeholder='"/admin"' />
         </Grid>
-
-        {/* Row 4: classtype, priority, sid, rev */}
-        <Grid item xs={4}>
+        <Grid item xs={3}>
           <FormControl fullWidth size="small">
             <InputLabel>Classtype</InputLabel>
             <Select value={uiForm.classtype} label="Classtype" onChange={set('classtype')}>
@@ -114,27 +136,26 @@ function UiFormMode({ uiForm, setUiForm, previewText }) {
             </Select>
           </FormControl>
         </Grid>
-        <Grid item xs={2}>
+        <Grid item xs={3}>
           <TextField fullWidth size="small" label="Priority" type="number"
             value={uiForm.priority} onChange={set('priority')} placeholder="1-3" />
         </Grid>
-        <Grid item xs={3}>
+        <Grid item xs={4}>
           <TextField fullWidth size="small" label="SID" type="number"
             value={uiForm.sid} onChange={set('sid')} placeholder="1000001" />
         </Grid>
-        <Grid item xs={3}>
+        <Grid item xs={2}>
           <TextField fullWidth size="small" label="Rev" type="number"
             value={uiForm.rev} onChange={set('rev')} />
         </Grid>
-
-        {/* Preview */}
-        <Grid item xs={12}>
-          <Typography variant="caption" color="text.secondary">Preview:</Typography>
-          <Box sx={{ bgcolor: 'grey.100', p: 1, borderRadius: 1, mt: 0.5, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
-            {previewText}
-          </Box>
-        </Grid>
       </Grid>
+      <Divider sx={{ my: 2 }}><Typography variant="caption">Generated rule preview</Typography></Divider>
+      <TextField fullWidth multiline rows={2}
+        value={previewText}
+        onChange={e => onPreviewEdit(e.target.value)}
+        sx={{ fontFamily: 'monospace', fontSize: 13 }}
+        helperText="You can edit the rule text directly. Changes will update the form fields above."
+      />
     </Box>
   );
 }
@@ -158,9 +179,9 @@ function AiMode({ aiPrompt, setAiPrompt, aiResult, setAiResult, aiLoading, onGen
       {aiResult && (
         <Box sx={{ mt: 2 }}>
           <Typography variant="caption" color="text.secondary">Generated rule:</Typography>
-          <Box sx={{ bgcolor: 'grey.100', p: 1, borderRadius: 1, mt: 0.5, fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' }}>
-            {aiResult}
-          </Box>
+          <TextField fullWidth multiline rows={2} value={aiResult}
+            onChange={e => setAiResult(e.target.value)}
+            sx={{ mt: 0.5, fontFamily: 'monospace', fontSize: 13 }} />
           <Button size="small" sx={{ mt: 1 }} onClick={() => setAiResult('')}>Clear</Button>
         </Box>
       )}
@@ -168,27 +189,17 @@ function AiMode({ aiPrompt, setAiPrompt, aiResult, setAiResult, aiLoading, onGen
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
 export default function Rules() {
   const [rules, setRules] = useState([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editRule, setEditRule] = useState(null);
-  const [createMode, setCreateMode] = useState(0); // 0=Direct, 1=UI Form, 2=AI
-
-  // Direct mode form
+  const [createMode, setCreateMode] = useState(0);
   const [form, setForm] = useState({ sid: '', rule_text: '', description: '', category: '' });
-
-  // UI form mode
   const [uiForm, setUiForm] = useState(emptyUiForm);
-
-  // AI mode
   const [aiPrompt, setAiPrompt] = useState('');
   const [aiResult, setAiResult] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
-
   const [error, setError] = useState('');
-
-  // Filtravimas
   const [searchText, setSearchText] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterEnabled, setFilterEnabled] = useState('');
@@ -201,7 +212,6 @@ export default function Rules() {
   const fetchRules = () => {
     api.get('/rules/').then(res => setRules(res.data)).catch(() => {});
   };
-
   useEffect(() => { fetchRules(); }, []);
 
   const categories = useMemo(() => {
@@ -260,7 +270,15 @@ export default function Rules() {
     setDialogOpen(true);
   };
 
-  // Gauti rule_text pagal režimą
+  const previewText = useMemo(() => buildRuleText(uiForm), [uiForm]);
+
+  const handlePreviewEdit = (text) => {
+    const parsed = parseRuleText(text);
+    if (parsed) {
+      setUiForm(parsed);
+    }
+  };
+
   const getActiveRuleText = () => {
     if (createMode === 0) return form.rule_text;
     if (createMode === 1) return buildRuleText(uiForm);
@@ -276,14 +294,12 @@ export default function Rules() {
   const handleSave = async () => {
     const rule_text = getActiveRuleText();
     if (!rule_text.trim()) { setError('Rule text is required'); return; }
-
     const payload = {
       sid: getActiveSid() || form.sid,
       rule_text,
       description: form.description,
       category: form.category,
     };
-
     try {
       if (editRule) {
         await api.put(`/rules/${editRule.id}`, payload);
@@ -293,7 +309,8 @@ export default function Rules() {
       setDialogOpen(false);
       fetchRules();
     } catch (err) {
-      setError('Error saving rule');
+      const msg = err.response?.data?.error || 'Error saving rule';
+      setError(msg);
     }
   };
 
@@ -322,7 +339,6 @@ export default function Rules() {
     }
   };
 
-  const previewText = useMemo(() => buildRuleText(uiForm), [uiForm]);
   const colSpan = isAdmin ? 6 : 5;
 
   const RuleRow = ({ rule }) => (
@@ -350,12 +366,8 @@ export default function Rules() {
     <Box>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
         <Typography variant="h4">Rules</Typography>
-        {isAdmin && (
-          <Button variant="contained" onClick={() => handleOpen()}>+ New Rule</Button>
-        )}
+        {isAdmin && <Button variant="contained" onClick={() => handleOpen()}>+ New Rule</Button>}
       </Box>
-
-      {/* Filtravimas ir grupavimas */}
       <Paper sx={{ p: 2, mb: 2 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} sm={6} md={3}>
@@ -391,14 +403,10 @@ export default function Rules() {
             }}>Clear</Button>
           </Grid>
           <Grid item xs={6} sm={3} md={1}>
-            <Typography variant="body2" color="text.secondary">
-              {filteredRules.length} / {rules.length}
-            </Typography>
+            <Typography variant="body2" color="text.secondary">{filteredRules.length} / {rules.length}</Typography>
           </Grid>
         </Grid>
       </Paper>
-
-      {/* Taisyklių lentelė */}
       <TableContainer component={Paper}>
         <Table size="small">
           <TableHead>
@@ -413,9 +421,7 @@ export default function Rules() {
           </TableHead>
           <TableBody>
             {filteredRules.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={colSpan} align="center">No rules found</TableCell>
-              </TableRow>
+              <TableRow><TableCell colSpan={colSpan} align="center">No rules found</TableCell></TableRow>
             ) : Object.entries(groupedRules).map(([groupName, groupRules]) => (
               <React.Fragment key={groupName}>
                 {groupBy !== 'none' && (
@@ -439,71 +445,46 @@ export default function Rules() {
         </Table>
       </TableContainer>
 
-      {/* New/Edit dialog */}
-      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="lg" fullWidth>
         <DialogTitle>{editRule ? 'Edit Rule' : 'New Rule'}</DialogTitle>
         <DialogContent>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-          {/* Režimo pasirinkimas – tik kuriant naują */}
-          {!editRule && (
-            <Tabs value={createMode} onChange={(_, v) => { setCreateMode(v); setError(''); }}
-              sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
-              <Tab label="Direct" />
-              <Tab label="UI Form" />
-              <Tab label="AI" />
-            </Tabs>
-          )}
-
-          {/* Bendri laukai */}
+          <Tabs value={createMode} onChange={(_, v) => { setCreateMode(v); setError(''); }}
+            sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
+            <Tab label="Direct" />
+            <Tab label="UI Form" />
+            <Tab label="AI" />
+          </Tabs>
           <Grid container spacing={2} sx={{ mb: 2 }}>
-            <Grid item xs={4}>
-              <TextField fullWidth size="small" label="SID" type="number"
-                value={createMode === 1 ? uiForm.sid : form.sid}
-                onChange={e => createMode === 1
-                  ? setUiForm(p => ({ ...p, sid: e.target.value }))
-                  : setForm(p => ({ ...p, sid: e.target.value }))}
-                disabled={!!editRule} />
-            </Grid>
-            <Grid item xs={4}>
+            <Grid item xs={6}>
               <TextField fullWidth size="small" label="Description" value={form.description}
                 onChange={e => setForm(p => ({ ...p, description: e.target.value }))} />
             </Grid>
-            <Grid item xs={4}>
+            <Grid item xs={6}>
               <TextField fullWidth size="small" label="Category" value={form.category}
                 onChange={e => setForm(p => ({ ...p, category: e.target.value }))} />
             </Grid>
           </Grid>
-
           <Divider sx={{ mb: 2 }} />
-
-          {/* Direct mode */}
-          {(createMode === 0 || editRule) && (
+          {createMode === 0 && (
             <TextField fullWidth multiline rows={4} label="Rule text"
               value={form.rule_text} onChange={e => setForm(p => ({ ...p, rule_text: e.target.value }))}
-              placeholder='alert tcp any any -> any 80 (msg:"HTTP traffic"; sid:1000001;)' />
+              placeholder='alert tcp any any -> any 80 (msg:"HTTP traffic"; sid:1000001; rev:1;)' />
           )}
-
-          {/* UI Form mode */}
-          {createMode === 1 && !editRule && (
-            <UiFormMode uiForm={uiForm} setUiForm={setUiForm} previewText={previewText} />
+          {createMode === 1 && (
+            <UiFormMode uiForm={uiForm} setUiForm={setUiForm}
+              previewText={previewText} onPreviewEdit={handlePreviewEdit} />
           )}
-
-          {/* AI mode */}
-          {createMode === 2 && !editRule && (
-            <AiMode
-              aiPrompt={aiPrompt} setAiPrompt={setAiPrompt}
+          {createMode === 2 && (
+            <AiMode aiPrompt={aiPrompt} setAiPrompt={setAiPrompt}
               aiResult={aiResult} setAiResult={setAiResult}
-              aiLoading={aiLoading} onGenerate={handleAiGenerate}
-            />
+              aiLoading={aiLoading} onGenerate={handleAiGenerate} />
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
           <Button variant="contained" onClick={handleSave}
-            disabled={createMode === 2 && !aiResult}>
-            Save
-          </Button>
+            disabled={createMode === 2 && !aiResult}>Save</Button>
         </DialogActions>
       </Dialog>
     </Box>

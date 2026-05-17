@@ -15,7 +15,7 @@ Example output: alert tcp any any -> any 80 (msg:"HTTP traffic"; sid:1000001; re
 Rules must follow Snort 2 syntax exactly."""
 
     message = client.messages.create(
-        model="claude-sonnet-4-20250514",
+        model="claude-sonnet-4-6",
         max_tokens=256,
         messages=[{"role": "user", "content": prompt}],
         system=system_prompt

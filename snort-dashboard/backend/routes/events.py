@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt_identity
+from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from models.user import db
 from models.event import Event, IpHdr, TcpHdr, UdpHdr, Signature
 from datetime import datetime
@@ -134,3 +134,15 @@ def save_filter():
     db.session.add(f)
     db.session.commit()
     return jsonify({'message': 'Filtras išsaugotas'}), 201
+@events_bp.route('/<int:sid>/<int:cid>', methods=['DELETE'])
+@jwt_required()
+def delete_event(sid, cid):
+    claims = get_jwt()
+    if claims.get('role') != 'admin':
+        return jsonify({'error': 'Unauthorized'}), 403
+    TcpHdr.query.filter_by(sid=sid, cid=cid).delete()
+    UdpHdr.query.filter_by(sid=sid, cid=cid).delete()
+    IpHdr.query.filter_by(sid=sid, cid=cid).delete()
+    Event.query.filter_by(sid=sid, cid=cid).delete()
+    db.session.commit()
+    return jsonify({'message': 'Event deleted'}), 200

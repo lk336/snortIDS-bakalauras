@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
 from models.user import db
 from models.rule import Rule, ActivityLog
+import re
 
 rules_bp = Blueprint('rules', __name__)
 
@@ -11,6 +12,12 @@ def export_rules():
         export_rules_to_snort()
     except Exception as e:
         print(f"Taisyklių eksporto klaida: {e}")
+
+def extract_sid_from_rule_text(rule_text):
+    match = re.search(r'\bsid\s*:\s*(\d+)', rule_text)
+    if match:
+        return int(match.group(1))
+    return None
 
 @rules_bp.route('/', methods=['GET'])
 @jwt_required()
@@ -26,6 +33,21 @@ def get_rules():
         'created_at': r.created_at.isoformat()
     } for r in rules])
 
+@rules_bp.route('/by-sid/<int:sid>', methods=['GET'])
+@jwt_required()
+def get_rule_by_sid(sid):
+    rule = Rule.query.filter_by(sid=sid).first()
+    if not rule:
+        return jsonify({'error': 'Rule not found'}), 404
+    return jsonify({
+        'id': rule.id,
+        'sid': rule.sid,
+        'rule_text': rule.rule_text,
+        'description': rule.description,
+        'category': rule.category,
+        'is_enabled': rule.is_enabled,
+    })
+
 @rules_bp.route('/', methods=['POST'])
 @jwt_required()
 def create_rule():
@@ -39,8 +61,16 @@ def create_rule():
     if not rule_text:
         return jsonify({'error': 'Rule text is required'}), 400
 
+    sid = extract_sid_from_rule_text(rule_text) or data.get('sid')
+    if not sid:
+        return jsonify({'error': 'SID is required (set it in the rule text or SID field)'}), 400
+
+    existing = Rule.query.filter_by(sid=sid).first()
+    if existing:
+        return jsonify({'error': f'SID {sid} already exists'}), 400
+
     rule = Rule(
-        sid=data.get('sid'),
+        sid=sid,
         rule_text=rule_text,
         description=data.get('description'),
         category=data.get('category'),
@@ -50,7 +80,7 @@ def create_rule():
     log = ActivityLog(
         user_id=user_id,
         action='CREATE_RULE',
-        details=f"SID: {data.get('sid')}",
+        details=f"SID: {sid}",
         ip_address=request.remote_addr
     )
     db.session.add(log)
@@ -70,7 +100,14 @@ def update_rule(rule_id):
 
     new_rule_text = data.get('rule_text')
     if new_rule_text:
-        rule.rule_text = new_rule_text.strip()
+        new_rule_text = new_rule_text.strip()
+        rule.rule_text = new_rule_text
+        extracted_sid = extract_sid_from_rule_text(new_rule_text)
+        if extracted_sid:
+            conflict = Rule.query.filter(Rule.sid == extracted_sid, Rule.id != rule_id).first()
+            if conflict:
+                return jsonify({'error': f'SID {extracted_sid} already exists in another rule'}), 400
+            rule.sid = extracted_sid
 
     rule.description = data.get('description', rule.description)
     rule.category = data.get('category', rule.category)
