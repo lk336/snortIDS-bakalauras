@@ -6,21 +6,6 @@ import bcrypt
 
 auth_bp = Blueprint('auth', __name__)
 
-@auth_bp.route('/register', methods=['POST'])
-def register():
-    data = request.get_json()
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify({'error': 'Vartotojas jau egzistuoja'}), 400
-    hashed = bcrypt.hashpw(data['password'].encode('utf-8'), bcrypt.gensalt())
-    user = User(
-        username=data['username'],
-        password_hash=hashed.decode('utf-8'),
-        role=data.get('role', 'user')
-    )
-    db.session.add(user)
-    db.session.commit()
-    return jsonify({'message': 'Vartotojas sukurtas'}), 201
-
 @auth_bp.route('/login', methods=['POST'])
 def login():
     data = request.get_json()

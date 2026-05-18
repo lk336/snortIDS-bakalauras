@@ -6,6 +6,7 @@ import {
 } from '@mui/material';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import SecurityIcon from '@mui/icons-material/Security';
+import AnalyticsIcon from '@mui/icons-material/Analytics';
 import RuleIcon from '@mui/icons-material/Rule';
 import ComputerIcon from '@mui/icons-material/Computer';
 import HistoryIcon from '@mui/icons-material/History';
@@ -15,6 +16,7 @@ const drawerWidth = 220;
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
   { text: 'Events', icon: <SecurityIcon />, path: '/events' },
+  { text: 'Event Analysis', icon: <AnalyticsIcon />, path: '/analysis' },
   { text: 'Rules', icon: <RuleIcon />, path: '/rules' },
   { text: 'Server', icon: <ComputerIcon />, path: '/server', adminOnly: true },
   { text: 'Activity Log', icon: <HistoryIcon />, path: '/activity', adminOnly: true },

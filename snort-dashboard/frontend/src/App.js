@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Events from './pages/Events';
+import EventAnalysis from './pages/EventAnalysis';
 import Rules from './pages/Rules';
 import ServerControl from './pages/ServerControl';
 import ActivityLog from './pages/ActivityLog';
@@ -25,6 +26,7 @@ function App() {
         }>
           <Route index element={<Dashboard />} />
           <Route path="events" element={<Events />} />
+          <Route path="analysis" element={<EventAnalysis />} />
           <Route path="rules" element={<Rules />} />
           <Route path="server" element={<ServerControl />} />
           <Route path="activity" element={<ActivityLog />} />

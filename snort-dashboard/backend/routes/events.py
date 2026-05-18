@@ -116,6 +116,125 @@ def get_events():
 
     return jsonify({'events': events, 'total': total, 'page': page, 'per_page': per_page, 'pages': results.pages})
 
+@events_bp.route('/analysis/by-date', methods=['GET'])
+@jwt_required()
+def analysis_by_date():
+    results = db.session.query(
+        db.func.date(Event.timestamp).label('group_key'),
+        db.func.count().label('count')
+    ).group_by(db.func.date(Event.timestamp))\
+     .order_by(db.func.date(Event.timestamp).desc()).all()
+
+    return jsonify([{'key': str(r.group_key), 'count': r.count} for r in results])
+
+
+@events_bp.route('/analysis/by-source-ip', methods=['GET'])
+@jwt_required()
+def analysis_by_source_ip():
+    results = db.session.query(
+        IpHdr.ip_src.label('group_key'),
+        db.func.count().label('count')
+    ).join(Event, (Event.sid == IpHdr.sid) & (Event.cid == IpHdr.cid))\
+     .group_by(IpHdr.ip_src)\
+     .order_by(db.func.count().desc()).limit(50).all()
+
+    return jsonify([{'key': int_to_ip(r.group_key), 'count': r.count} for r in results])
+
+
+@events_bp.route('/analysis/by-attack-type', methods=['GET'])
+@jwt_required()
+def analysis_by_attack_type():
+    results = db.session.query(
+        Signature.sig_name.label('group_key'),
+        db.func.count().label('count')
+    ).join(Event, Event.signature == Signature.sig_id)\
+     .group_by(Signature.sig_name)\
+     .order_by(db.func.count().desc()).limit(50).all()
+
+    return jsonify([{'key': r.group_key, 'count': r.count} for r in results])
+
+
+@events_bp.route('/analysis/by-port', methods=['GET'])
+@jwt_required()
+def analysis_by_port():
+    tcp_results = db.session.query(
+        TcpHdr.tcp_dport.label('port'),
+        db.func.count().label('count')
+    ).group_by(TcpHdr.tcp_dport).all()
+
+    udp_results = db.session.query(
+        UdpHdr.udp_dport.label('port'),
+        db.func.count().label('count')
+    ).group_by(UdpHdr.udp_dport).all()
+
+    port_counts = {}
+    for r in tcp_results:
+        if r.port is not None:
+            port_counts[r.port] = port_counts.get(r.port, 0) + r.count
+    for r in udp_results:
+        if r.port is not None:
+            port_counts[r.port] = port_counts.get(r.port, 0) + r.count
+
+    sorted_ports = sorted(port_counts.items(), key=lambda x: x[1], reverse=True)[:50]
+    return jsonify([{'key': str(port), 'count': count} for port, count in sorted_ports])
+
+
+@events_bp.route('/analysis/details/<string:group_by>/<path:group_key>', methods=['GET'])
+@jwt_required()
+def analysis_details(group_by, group_key):
+    """Returns individual events for a specific group (when user clicks to expand)"""
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+
+    query = db.session.query(Event, IpHdr, Signature)\
+        .join(IpHdr, (Event.sid == IpHdr.sid) & (Event.cid == IpHdr.cid))\
+        .join(Signature, Event.signature == Signature.sig_id)
+
+    if group_by == 'date':
+        query = query.filter(db.func.date(Event.timestamp) == group_key)
+    elif group_by == 'source_ip':
+        try:
+            ip_int = struct.unpack('!I', socket.inet_aton(group_key))[0]
+            query = query.filter(IpHdr.ip_src == ip_int)
+        except Exception:
+            return jsonify({'events': [], 'total': 0}), 200
+    elif group_by == 'attack_type':
+        query = query.filter(Signature.sig_name == group_key)
+    elif group_by == 'port':
+        port_num = int(group_key)
+        query = query\
+            .outerjoin(TcpHdr, (Event.sid == TcpHdr.sid) & (Event.cid == TcpHdr.cid))\
+            .outerjoin(UdpHdr, (Event.sid == UdpHdr.sid) & (Event.cid == UdpHdr.cid))\
+            .filter(
+                (TcpHdr.tcp_dport == port_num) | (UdpHdr.udp_dport == port_num)
+            )
+
+    query = query.order_by(Event.timestamp.desc())
+    total = query.count()
+    results = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    events = []
+    for event, iphdr, sig in results.items:
+        tcp = TcpHdr.query.filter_by(sid=event.sid, cid=event.cid).first()
+        udp = UdpHdr.query.filter_by(sid=event.sid, cid=event.cid).first()
+        src_port = tcp.tcp_sport if tcp else (udp.udp_sport if udp else None)
+        dst_port = tcp.tcp_dport if tcp else (udp.udp_dport if udp else None)
+        events.append({
+            'sid': event.sid,
+            'cid': event.cid,
+            'timestamp': event.timestamp.isoformat() if event.timestamp else None,
+            'src_ip': int_to_ip(iphdr.ip_src) if iphdr.ip_src else None,
+            'dst_ip': int_to_ip(iphdr.ip_dst) if iphdr.ip_dst else None,
+            'src_port': src_port,
+            'dst_port': dst_port,
+            'protocol': iphdr.ip_proto,
+            'signature': sig.sig_name,
+            'priority': sig.sig_priority,
+        })
+
+    return jsonify({'events': events, 'total': total, 'page': page, 'per_page': per_page})
+
+
 @events_bp.route('/filters', methods=['GET'])
 @jwt_required()
 def get_filters():
