@@ -11,7 +11,7 @@ def export_rules():
     try:
         export_rules_to_snort()
     except Exception as e:
-        print(f"Taisyklių eksporto klaida: {e}")
+        print(f"Rule export error: {e}")
 
 def extract_sid_from_rule_text(rule_text):
     match = re.search(r'\bsid\s*:\s*(\d+)', rule_text)
@@ -53,7 +53,7 @@ def get_rule_by_sid(sid):
 def create_rule():
     claims = get_jwt()
     if claims.get('role') != 'admin':
-        return jsonify({'error': 'Nėra teisių'}), 403
+        return jsonify({'error': 'Unauthorized'}), 403
     user_id = int(get_jwt_identity())
     data = request.get_json()
 
@@ -86,14 +86,14 @@ def create_rule():
     db.session.add(log)
     db.session.commit()
     export_rules()
-    return jsonify({'message': 'Taisyklė sukurta', 'id': rule.id}), 201
+    return jsonify({'message': 'Rule created', 'id': rule.id}), 201
 
 @rules_bp.route('/<int:rule_id>', methods=['PUT'])
 @jwt_required()
 def update_rule(rule_id):
     claims = get_jwt()
     if claims.get('role') != 'admin':
-        return jsonify({'error': 'Nėra teisių'}), 403
+        return jsonify({'error': 'Unauthorized'}), 403
     user_id = int(get_jwt_identity())
     rule = Rule.query.get_or_404(rule_id)
     data = request.get_json()
@@ -122,14 +122,14 @@ def update_rule(rule_id):
     db.session.add(log)
     db.session.commit()
     export_rules()
-    return jsonify({'message': 'Taisyklė atnaujinta'})
+    return jsonify({'message': 'Rule updated'})
 
 @rules_bp.route('/<int:rule_id>', methods=['DELETE'])
 @jwt_required()
 def delete_rule(rule_id):
     claims = get_jwt()
     if claims.get('role') != 'admin':
-        return jsonify({'error': 'Nėra teisių'}), 403
+        return jsonify({'error': 'Unauthorized'}), 403
     user_id = int(get_jwt_identity())
     rule = Rule.query.get_or_404(rule_id)
     db.session.delete(rule)
@@ -142,14 +142,14 @@ def delete_rule(rule_id):
     db.session.add(log)
     db.session.commit()
     export_rules()
-    return jsonify({'message': 'Taisyklė ištrinta'})
+    return jsonify({'message': 'Rule deleted'})
 
 @rules_bp.route('/ai-generate', methods=['POST'])
 @jwt_required()
 def ai_generate():
     claims = get_jwt()
     if claims.get('role') != 'admin':
-        return jsonify({'error': 'Nėra teisių'}), 403
+        return jsonify({'error': 'Unauthorized'}), 403
     data = request.get_json()
     prompt = data.get('prompt', '')
     if not prompt:

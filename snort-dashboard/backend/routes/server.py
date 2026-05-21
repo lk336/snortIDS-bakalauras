@@ -27,18 +27,18 @@ def start_snort():
     identity = get_jwt_identity()
     claims = get_jwt()
     if claims.get('role') != 'admin':
-        return jsonify({'error': 'Nėra teisių'}), 403
+        return jsonify({'error': 'Unauthorized'}), 403
     export_rules_to_snort()
     subprocess.Popen(['snort', '-c', '/etc/snort/snort.conf', '-i', 'ens33', '-D', '-l', '/var/log/snort'])
     log = ActivityLog(
         user_id=int(identity),
         action='START_SNORT',
-        details='Snort paleistas',
+        details='Snort starting',
         ip_address=request.remote_addr
     )
     db.session.add(log)
     db.session.commit()
-    return jsonify({'message': 'Snort paleistas'})
+    return jsonify({'message': 'Snort starting'})
 
 @server_bp.route('/stop', methods=['POST'])
 @jwt_required()
@@ -46,14 +46,14 @@ def stop_snort():
     identity = get_jwt_identity()
     claims = get_jwt()
     if claims.get('role') != 'admin':
-        return jsonify({'error': 'Nėra teisių'}), 403
+        return jsonify({'error': 'Unauthorized'}), 403
     subprocess.run(['pkill', 'snort'])
     log = ActivityLog(
         user_id=int(identity),
         action='STOP_SNORT',
-        details='Snort sustabdytas',
+        details='Snort stopping',
         ip_address=request.remote_addr
     )
     db.session.add(log)
     db.session.commit()
-    return jsonify({'message': 'Snort sustabdytas'})
+    return jsonify({'message': 'Snort stopping'})

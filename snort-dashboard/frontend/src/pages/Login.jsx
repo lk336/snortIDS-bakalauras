@@ -13,6 +13,7 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
+    setError('');
     try {
       const res = await api.post('/auth/login', { username, password });
       localStorage.setItem('token', res.data.token);
@@ -20,7 +21,11 @@ export default function Login() {
       localStorage.setItem('username', res.data.username);
       navigate('/');
     } catch (err) {
-      setError('Invalid username or password');
+      if (err.response?.status === 423) {
+        setError('Account is temporarily locked. Try again later.');
+      } else {
+        setError('Invalid username or password');
+      }
     }
   };
 

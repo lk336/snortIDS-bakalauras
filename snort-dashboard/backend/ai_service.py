@@ -1,10 +1,13 @@
 import anthropic
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def generate_snort_rule(prompt: str) -> str:
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    api_key = os.environ.get('AI_API_KEY')
     if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY not set")
+        raise ValueError("AI_API_KEY not set")
     
     client = anthropic.Anthropic(api_key=api_key)
 

@@ -252,7 +252,7 @@ def save_filter():
     f = SavedFilter(user_id=user_id, name=data['name'], filter_config=data['filter_config'])
     db.session.add(f)
     db.session.commit()
-    return jsonify({'message': 'Filtras išsaugotas'}), 201
+    return jsonify({'message': 'Filter saved'}), 201
 @events_bp.route('/<int:sid>/<int:cid>', methods=['DELETE'])
 @jwt_required()
 def delete_event(sid, cid):
